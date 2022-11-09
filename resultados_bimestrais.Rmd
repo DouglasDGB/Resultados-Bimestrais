@@ -1,0 +1,604 @@
+---
+title: "frequencia_nota_1_2_3_bi"
+author: "Douglas Gonçalves Bernardo"
+date: "17/10/2022"
+output: html_document
+---
+
+```{r Biblioteca}
+
+library(readxl)
+library(writexl)
+library(tidyverse)
+library(data.table)
+library(rstudioapi)
+library(magrittr)
+library(googlesheets4)
+library(lubridate)
+library(openxlsx)
+```
+
+```{r Diretório}
+
+diretorio <- dirname(dirname(dirname(getSourceEditorContext()$path)))
+
+```
+
+
+```{r teste}
+ setwd(file.path((diretorio), "diversos","saidas"))
+
+relatorio <- fread(file = list.files(pattern = "2022_10_18_Resultados_bimestrais.csv"),
+                       sep = ",",
+                       na.strings = "") %>% 
+  select(-V1)
+
+teste <- relatorio %>% 
+  distinct()
+
+```
+
+
+
+
+
+
+```{r Entradas}
+
+setwd(file.path(diretorio,"entradas"))
+
+listaArquivos = c("tb_endereco", "tb_deficiencia", "tb_turma", "tb_matricula", "tb_cadastro", "tb_enturmacao")
+
+for (nometb in listaArquivos){
+  
+  df <- fread(file = list.files(pattern = nometb), sep = "|", encoding = "UTF-8", na.strings = "")
+  
+    primeiraColuna <- colnames(df)[1] %>% 
+      str_replace_all("#","")
+    setnames(df,colnames(df)[1],primeiraColuna)
+    
+    assign(nometb, df)
+    
+    rm(df)
+  }
+  
+  rm(nometb)
+  
+# Arquivos do DED por aluno
+
+setwd(file.path(diretorio,"entradas"))
+
+tb_ded_aluno_1bi <- fread(file = list.files(pattern = "tb_ded_aluno_1_bimestre"),
+                       sep = "|",
+                       encoding = "UTF-8",
+                       na.strings = "") %>%
+  setnames("#id_aluno", "id_aluno")
+
+tb_ded_aluno_2bi <- fread(file = list.files(pattern = "tb_ded_aluno_2_bimestre"),
+                       sep = "|",
+                       encoding = "UTF-8",
+                       na.strings = "") %>%
+  setnames("#id_aluno", "id_aluno")
+
+setwd(file.path(diretorio,"entradas"))
+
+tb_ded_aluno_3bi <- fread(file = list.files(pattern = "tb_ded_aluno_3_bimestre"),
+                       sep = "|",
+                       encoding = "UTF-8",
+                       na.strings = "") %>%
+  setnames("#id_aluno", "id_aluno") %>% 
+  mutate(qt_faltas_3bi = qt_faltas) %>% 
+  mutate(nota_atv_normal_3bi = nota_atv_normal) %>% 
+  mutate(nota_atv_recuperacao_3bi = nota_atv_recuperacao) %>% 
+  mutate(nota_final_3bi = nota_final)
+# Arquios do ded da turma
+
+setwd(file.path(diretorio,"entradas"))
+
+tb_ded_turma <- fread(file = list.files(pattern = "tb_ded_turma"),
+                       sep = "|",
+                       encoding = "UTF-8",
+                       na.strings = "") %>%
+   setnames("#dc_sre", "dc_sre") 
+  
+tb_planos <- fread(file = list.files(pattern = "Rel_Planos_Curriculares_0165588"),
+               sep = "|",
+               encoding = "UTF-8",
+               na.strings = "") %>% 
+  setnames("#CODIGO_PROGRAMA", "CODIGO_PROGRAMA")
+colnames(tb_planos) <- tolower(colnames(tb_planos))
+
+```
+
+```{r Tratamento}
+
+t_endereco_principal  <- tb_endereco  %>%
+  filter(tp_situacao_end == "Ativo",
+         tp_situacao_escola == "Em Atividade",
+         dc_dependencia == "Estadual",
+         fl_end_principal == "Sim") %>%
+  select(dc_sre,id_municipio, id_escola, nome_escola) %>% 
+  unique()
+
+t_ded_aluno_1bi <- tb_ded_aluno_1bi %>%
+  select(id_matricula,
+         id_aluno,
+         nome_aluno,
+         id_turma,
+         dc_bimestre,
+         id_disciplina,
+         dc_etapa_matricula,
+         qt_faltas,
+         nota_final) %>% 
+  unique()
+    
+t_ded_aluno_2bi <- tb_ded_aluno_2bi %>%
+  select(id_matricula,
+         id_aluno,
+         nome_aluno,
+         id_turma,
+         dc_bimestre,
+         id_disciplina,
+         dc_etapa_matricula,
+         qt_faltas,
+         nota_final) %>% 
+      unique()
+
+t_ded_aluno_3bi <- tb_ded_aluno_3bi %>%
+  select(id_matricula,
+         id_aluno,
+         nome_aluno,
+         id_turma,
+         dc_bimestre,
+         id_disciplina,
+         dc_etapa_matricula,
+         qt_faltas,
+         nota_final) %>% 
+      unique()
+    
+t_ded_turma <- tb_ded_turma %>%
+  select(dc_sre,
+         id_escola,
+         id_turma,
+         dc_tipo_ensino,
+         dc_nivel,
+         dc_etapa,
+         dc_etapa_matricula,
+         dc_turno,
+         dc_bimestre,
+         id_disciplina,
+         dc_disciplina,
+         qt_aulas,
+         valor_atv_normal,
+         valor_atv_recuperacao,
+         fechado_aula,
+         fechado_atividade
+         ) %>%
+  dplyr::rename(dc_etapa_turma = dc_etapa) %>% 
+  unique() %>%
+  mutate(dc_etapa_matricula = case_when(
+    dc_etapa_matricula == "1º ao 5º" ~ "1º,2º,3º,4º,5º",
+    dc_etapa_matricula == "6º e 7º" ~ "6º,7º",
+    dc_etapa_matricula == "8º e 9º" ~ "8º,9º",
+    TRUE ~ dc_etapa_matricula)) %>% # caso contrário, retorna o mesmo valor
+    separate_rows(dc_etapa_matricula, sep = ",") %>%
+  setnames("qt_aulas", "qt_aulas_lecionadas")
+
+
+    
+      # como temos turmas multisseriadas, é preciso fazes o join entre as bases de turma e matricula do ded usando as variaveis dc_etapa_matricula, dc_bimestre, id_turma, id_disciplina para não duplicar
+    #corrigindo os casos em que a dc_etapa_matricula da tb_ded_turma aparece igual a dc_etapa das turmas multi e de CF
+ 
+t_turma <- tb_turma %>%
+  filter(ano_administrativo == 2022,
+         fl_ativa == "Sim") %>%
+  mutate(tipo_turma = if_else(fl_multiseriada == "Sim", "MULTISSERIADA",
+                              if_else(fl_correcao_fluxo == "Sim", "CORREÇÃO DE FLUXO",
+                                      "NORMAL"))) %>%
+  select(id_turma, nome_turma, fl_reforco_escolar, dt_criacao, fl_multiseriada, nome_programa, id_especificidade, tipo_turma) 
+  
+planos_lista <- tb_planos %>% 
+  distinct(programa_pedagogico, codigo_componente_curricular, 
+         codigo_especificidade, turno, tipo_turma, 
+         duracao_modulo_aula, computa_carga, reprovao_por_avaliacao, tipo_turma) %>% 
+  mutate(tipo_turma = if_else(tipo_turma == "REGULAR", "NORMAL", tipo_turma)) %>% 
+  select(programa_pedagogico, codigo_componente_curricular, 
+         codigo_especificidade, turno, tipo_turma, 
+         duracao_modulo_aula, computa_carga, reprovao_por_avaliacao)
+
+# Concatenando as deficiências
+
+deficiencias_pivot <- tb_deficiencia %>%
+  mutate(fl_deficiencia = "Sim") %>%
+  select(-id_tipo_deficiencia) %>%
+  pivot_wider(names_from = dc_tipo_deficiencia,
+              names_prefix = "",
+              values_from = dc_tipo_deficiencia)
+
+deficiencias_pivot$dc_deficiencia <- apply(deficiencias_pivot[, 4:16], 1, paste0, collapse = ", ")
+
+deficiencias_pivot$dc_deficiencia <- str_remove_all(deficiencias_pivot$dc_deficiencia, "NA, ")
+
+deficiencias_pivot$dc_deficiencia <- str_remove_all(deficiencias_pivot$dc_deficiencia, ", NA")
+
+deficiencias_pivot <- deficiencias_pivot %>% select(id_aluno, dc_deficiencia) %>% unique()
+
+
+
+
+turmas_ded_1bi <- tb_ded_turma %>%  
+  filter(dc_bimestre == "1º BIMESTRE") %>% 
+  select(-nome_escola,-nome_turma,-dc_nivel,
+         -dc_sre) %>% #Normalização Nome Escola DED x Simade
+  inner_join(t_endereco_principal, by = "id_escola") %>% 
+  inner_join(t_turma, by = "id_turma") %>%
+  select(dc_sre, id_escola, nome_escola, 
+         id_turma:dc_disciplina, qt_aulas,
+         valor_atv_normal, valor_atv_recuperacao,
+         fechado_aula, fechado_atividade,
+         nome_programa, id_especificidade, tipo_turma) %>% 
+  distinct()
+
+
+turmas_ded_2bi <- tb_ded_turma %>%  
+  filter(dc_bimestre == "2º BIMESTRE") %>% 
+  select(-nome_escola,-nome_turma,-dc_nivel,
+         -dc_sre) %>% #Normalização Nome Escola DED x Simade
+  inner_join(t_endereco_principal, by = "id_escola") %>% 
+  inner_join(t_turma, by = "id_turma") %>%
+  select(dc_sre, id_escola, nome_escola, 
+         id_turma:dc_disciplina, qt_aulas,
+         valor_atv_normal, valor_atv_recuperacao,
+         fechado_aula, fechado_atividade,
+         nome_programa, id_especificidade, tipo_turma) %>% 
+  distinct()
+
+turmas_ded_3bi <- tb_ded_turma %>%  
+  filter(dc_bimestre == "3º BIMESTRE") %>% 
+  select(-nome_escola,-nome_turma,-dc_nivel,
+         -dc_sre) %>% #Normalização Nome Escola DED x Simade
+  inner_join(t_endereco_principal, by = "id_escola") %>% 
+  inner_join(t_turma, by = "id_turma") %>%
+  select(dc_sre, id_escola, nome_escola, 
+         id_turma:dc_disciplina, qt_aulas,
+         valor_atv_normal, valor_atv_recuperacao,
+         fechado_aula, fechado_atividade,
+         nome_programa, id_especificidade, tipo_turma) %>% 
+  distinct()
+  
+
+
+#remove("tb_endereco", "tb_deficiencia", "tb_turma", "tb_matricula", "tb_cadastro", "tb_enturmacao", "tb_planos")  
+```
+
+```{r Mesclagem}
+
+# Juntando as bases do ded de aluno e turma
+
+m_ded_1bi <- t_ded_aluno_1bi %>%
+  left_join(t_ded_turma, by = c("id_turma", "dc_bimestre", "id_disciplina", "dc_etapa_matricula")) %>% 
+  inner_join(t_endereco_principal, by = "id_escola") %>% 
+  left_join(deficiencias_pivot, "id_aluno") %>% 
+  left_join(tb_cadastro %>% select(id_aluno, dt_nascimento), "id_aluno") %>%
+  left_join(t_turma, "id_turma") %>%
+  select(
+    #id_escola,
+    nome_escola,
+    id_turma,
+    nome_turma,
+    id_matricula,
+    id_aluno,
+    nome_aluno,
+    dt_nascimento,
+    dc_deficiencia,
+    dc_etapa_matricula,
+    #dc_etapa_turma,
+    #dc_tipo_ensino,
+    #dc_nivel,
+    #dc_turno,
+    id_disciplina,
+    #dc_disciplina,
+    nota_final,
+    #valor_atv_normal,
+    #valor_atv_recuperacao,
+    #qt_aulas_lecionadas,
+    qt_faltas,
+    dc_bimestre,
+    tipo_turma,
+    nome_programa,
+    id_especificidade) 
+
+m_ded_2bi <- t_ded_aluno_2bi %>%
+  left_join(t_ded_turma, by = c("id_turma", "dc_bimestre", "id_disciplina", "dc_etapa_matricula")) %>% 
+  inner_join(t_endereco_principal, by = "id_escola") %>% 
+  left_join(deficiencias_pivot, "id_aluno") %>% 
+  left_join(tb_cadastro %>% select(id_aluno, dt_nascimento), "id_aluno") %>%
+  left_join(t_turma, "id_turma") %>%
+  select(
+    #id_escola,
+    nome_escola,
+    id_turma,
+    nome_turma,
+    id_matricula,
+    id_aluno,
+    nome_aluno,
+    dt_nascimento,
+    dc_deficiencia,
+    dc_etapa_matricula,
+    #dc_etapa_turma,
+    #dc_tipo_ensino,
+    #dc_nivel,
+    #dc_turno,
+    id_disciplina,
+    #dc_disciplina,
+    nota_final,
+    #valor_atv_normal,
+    #valor_atv_recuperacao,
+    #qt_aulas_lecionadas,
+    qt_faltas,
+    dc_bimestre,
+    tipo_turma,
+    nome_programa,
+    id_especificidade)
+
+m_ded_3bi <- t_ded_aluno_3bi %>%
+  left_join(t_ded_turma, by = c("id_turma", "dc_bimestre", "id_disciplina", "dc_etapa_matricula")) %>% 
+  inner_join(t_endereco_principal, by = "id_escola") %>% 
+  left_join(deficiencias_pivot, "id_aluno") %>% 
+  left_join(tb_cadastro %>% select(id_aluno, dt_nascimento), "id_aluno") %>%
+  left_join(t_turma, "id_turma") %>%
+  select(
+    #id_escola,
+    nome_escola,
+    id_turma,
+    nome_turma,
+    id_matricula,
+    id_aluno,
+    nome_aluno,
+    dt_nascimento,
+    dc_deficiencia,
+    dc_etapa_matricula,
+    #dc_etapa_turma,
+    #dc_tipo_ensino,
+    #dc_nivel,
+    #dc_turno,
+    id_disciplina,
+    #dc_disciplina,
+    nota_final,
+    #valor_atv_normal,
+    #valor_atv_recuperacao,
+    #qt_aulas_lecionadas,
+    qt_faltas,
+    dc_bimestre,
+    tipo_turma,
+    nome_programa,
+    id_especificidade) 
+
+remove("tb_endereco", "tb_deficiencia", "tb_turma", "tb_matricula", "tb_cadastro", "tb_enturmacao", "tb_planos")  
+```
+
+
+```{r detalhe}
+
+detalhe_1bi <- turmas_ded_1bi %>%
+  inner_join(t_ded_aluno_1bi,
+             by = c("id_turma", "id_disciplina",
+                    "dc_etapa_matricula", "dc_bimestre")) %>%
+  inner_join(planos_lista, by = c("nome_programa" = "programa_pedagogico",
+                           "id_disciplina" = "codigo_componente_curricular",
+                           "id_especificidade" = "codigo_especificidade",
+                           "dc_turno" = "turno", "tipo_turma")) %>%
+  mutate(aprovado_nota_disciplina = if_else(nota_final>.6*valor_atv_normal, "Sim", "Não"),
+         aprovado_frequencia_disciplina= if_else(qt_faltas<=.75*qt_aulas, "Sim", "Não"),
+         reprova_por_nota = reprovao_por_avaliacao,
+         reprova_por_frequencia = if_else(is.na(duracao_modulo_aula), "Não", "Sim")) %>% 
+  select(-c(nome_programa, id_especificidade, duracao_modulo_aula, computa_carga, reprovao_por_avaliacao))
+
+detalhe_2bi <- turmas_ded_2bi %>%
+  inner_join(t_ded_aluno_2bi,
+             by = c("id_turma", "id_disciplina",
+                    "dc_etapa_matricula", "dc_bimestre")) %>%
+  inner_join(planos_lista, by = c("nome_programa" = "programa_pedagogico",
+                           "id_disciplina" = "codigo_componente_curricular",
+                           "id_especificidade" = "codigo_especificidade",
+                           "dc_turno" = "turno", "tipo_turma")) %>%
+  mutate(aprovado_nota_disciplina = if_else(nota_final>.6*valor_atv_normal, "Sim", "Não"),
+         aprovado_frequencia_disciplina= if_else(qt_faltas<=.75*qt_aulas, "Sim", "Não"),
+         reprova_por_nota = reprovao_por_avaliacao,
+         reprova_por_frequencia = if_else(is.na(duracao_modulo_aula), "Não", "Sim")) %>% 
+  select(-c(nome_programa, id_especificidade, duracao_modulo_aula, computa_carga, reprovao_por_avaliacao)) 
+
+detalhe_3bi <- turmas_ded_3bi %>%
+  inner_join(t_ded_aluno_3bi,
+             by = c("id_turma", "id_disciplina",
+                    "dc_etapa_matricula", "dc_bimestre")) %>%
+  inner_join(planos_lista, by = c("nome_programa" = "programa_pedagogico",
+                           "id_disciplina" = "codigo_componente_curricular",
+                           "id_especificidade" = "codigo_especificidade",
+                           "dc_turno" = "turno", "tipo_turma")) %>%
+  mutate(aprovado_nota_disciplina = if_else(nota_final>.6*valor_atv_normal, "Sim", "Não"),
+         aprovado_frequencia_disciplina= if_else(qt_faltas<=.75*qt_aulas, "Sim", "Não"),
+         reprova_por_nota = reprovao_por_avaliacao,
+         reprova_por_frequencia = if_else(is.na(duracao_modulo_aula), "Não", "Sim")) %>% 
+  select(-c(nome_programa, id_especificidade, duracao_modulo_aula, computa_carga, reprovao_por_avaliacao))
+
+
+
+### Rendimento Acumulado 1º e 2º bimestres
+
+tb_ded_aluno_soma <- tb_ded_aluno_1bi %>% 
+  select(-dc_bimestre) %>% 
+  inner_join(tb_ded_aluno_2bi %>% select(-dc_bimestre), 
+             by = c("id_aluno", "id_matricula", "nome_aluno", 
+                    "id_turma", "dc_etapa_matricula", "id_disciplina"),
+             suffix = c("_1bi", "_2bi")) %>%
+  inner_join(tb_ded_aluno_3bi %>% select(-dc_bimestre,-nota_atv_normal,-nota_atv_recuperacao,-nota_final,-qt_faltas), 
+             by = c("id_aluno", "id_matricula", "nome_aluno", 
+                    "id_turma", "dc_etapa_matricula", "id_disciplina")) %>% 
+  dplyr::mutate(qt_faltas = select(., starts_with("qt_faltas")) %>% rowSums(na.rm = T),
+         nota_atv_normal = select(., starts_with("nota_atv_normal")) %>% rowSums(na.rm = T),
+         nota_atv_recuperacao = select(., starts_with("nota_atv_recuperacao")) %>% rowSums(na.rm = T),
+         nota_final = select(., starts_with("nota_final")) %>% rowSums(na.rm = T)) 
+
+tb_ded_turma_soma <- tb_ded_turma %>%
+  filter(dc_bimestre %in% c("1º BIMESTRE", "2º BIMESTRE", "3º BIMESTRE")) %>% 
+  mutate(dc_bimestre = case_when(
+    dc_bimestre == "1º BIMESTRE" ~ "1bi",
+    dc_bimestre == "2º BIMESTRE" ~ "2bi",
+    dc_bimestre == "3º BIMESTRE" ~ "3bi")) %>% 
+  pivot_wider(id_cols = c(dc_sre:dc_turno, id_disciplina:dc_disciplina),
+              names_from = dc_bimestre,
+              values_from = qt_aulas:envio_simade_atividade) %>% 
+  mutate(qt_aulas = select(., starts_with("qt_aulas")) %>% rowSums(na.rm = T),
+         qt_aulas_remoto = select(., starts_with("qt_aulas_remoto")) %>% rowSums(na.rm = T),
+         qt_aulas_total = select(., starts_with("qt_aulas_total")) %>% rowSums(na.rm = T),
+         qt_atv_normal = select(., starts_with("qt_atv_normal")) %>% rowSums(na.rm = T),
+         valor_atv_normal = select(., starts_with("valor_atv_normal")) %>% rowSums(na.rm = T),
+         valor_atv_recuperacao = select(., starts_with("valor_atv_recuperacao")) %>% rowSums(na.rm = T),
+         fechado_aula = if_else(fechado_aula_1bi == 1 & fechado_aula_2bi == 1, 1, 0),
+         envio_simade_aula = if_else(envio_simade_aula_1bi == 1 & envio_simade_aula_2bi == 1 & envio_simade_aula_3bi == 1, 1, 0),
+         fechado_atividade = if_else(fechado_atividade_1bi == 1 & fechado_atividade_2bi == 1 & fechado_atividade_3bi == 1, 1, 0),
+         envio_simade_atividade = if_else(envio_simade_atividade_1bi == 1 & envio_simade_atividade_2bi == 1 & envio_simade_atividade_3bi == 1, 1, 0))
+
+
+turmas_ded_soma <- tb_ded_turma_soma %>%  
+  select(-nome_escola,-dc_sre,-nome_turma,-dc_tipo_ensino,-dc_etapa) %>% #Normalização Nome Escola DED x Simade
+  inner_join(t_endereco_principal, by = "id_escola") %>% 
+  inner_join(t_turma, by = "id_turma") %>% 
+  select(dc_sre, id_escola, nome_escola, 
+         id_turma:dc_disciplina, qt_aulas,
+         valor_atv_normal, valor_atv_recuperacao,
+         fechado_aula, fechado_atividade,
+         nome_programa, id_especificidade, tipo_turma) %>% 
+  distinct()
+
+frequencia_soma_agg <- tb_ded_aluno_soma %>%
+  inner_join(turmas_ded_soma,
+             by = c("id_turma", "id_disciplina",
+                    "dc_etapa_matricula")) %>%
+  select(-starts_with("nota"), valor_atv_normal, valor_atv_recuperacao, fechado_aula, fechado_atividade) %>% 
+  inner_join(planos_lista %>% filter(!is.na(duracao_modulo_aula)), #Apenas disciplinas que contam frequência
+             by = c("nome_programa" = "programa_pedagogico",
+                           "id_disciplina" = "codigo_componente_curricular",
+                           "id_especificidade" = "codigo_especificidade",
+                           "dc_turno" = "turno", "tipo_turma")) %>%
+  mutate(dc_disciplina = if_else(computa_carga == "Com Grupo ", "Grupo Dia", dc_disciplina),
+         id_disciplina = if_else(computa_carga == "Com Grupo ", as.integer(0), id_disciplina)) %>% 
+  distinct() %>% 
+  filter(!(dc_nivel == "ENSINO FUNDAMENTAL ANOS INICIAIS" & computa_carga == "Individual")) %>% 
+  group_by(id_matricula, id_turma) %>% 
+  summarise(n_disciplinas_frequencia = n_distinct(id_disciplina),
+            total_aulas_lecionadas = sum(qt_aulas, na.rm = T),
+            total_faltas = sum(qt_faltas, na.rm = T),
+            frequencia_global = (1 - total_faltas/total_aulas_lecionadas)*100,
+            aprovado_frequencia = if_else(frequencia_global >= 75, "Sim", "Não"))
+
+nota_soma_agg <- tb_ded_aluno_soma %>%
+  inner_join(turmas_ded_soma,
+             by = c("id_turma", "id_disciplina",
+                    "dc_etapa_matricula")) %>%
+  inner_join(planos_lista %>% filter(reprovao_por_avaliacao == "Sim"), 
+             by = c("nome_programa" = "programa_pedagogico",
+                           "id_disciplina" = "codigo_componente_curricular",
+                           "id_especificidade" = "codigo_especificidade",
+                           "dc_turno" = "turno", "tipo_turma")) %>% 
+  mutate(reprovado_nota_disciplina = if_else(nota_final<.6*valor_atv_normal, 1, 0)) %>% 
+  group_by(id_matricula, id_turma) %>% 
+  summarise(n_disciplinas_nota = n_distinct(id_disciplina),
+            n_reprovacoes_nota = sum(reprovado_nota_disciplina, na.rm = T),
+            aprovado_nota = if_else(n_reprovacoes_nota <= 3, "Sim", "Não"))
+
+detalhe_soma <- turmas_ded_soma %>%
+  inner_join(tb_ded_aluno_soma,
+             by = c("id_turma", "id_disciplina",
+                    "dc_etapa_matricula")) %>%
+  inner_join(planos_lista, by = c("nome_programa" = "programa_pedagogico",
+                           "id_disciplina" = "codigo_componente_curricular",
+                           "id_especificidade" = "codigo_especificidade",
+                           "dc_turno" = "turno", "tipo_turma")) %>%
+  mutate(aprovado_nota_disciplina = if_else(nota_final>.6*valor_atv_normal, "Sim", "Não"),
+         aprovado_frequencia_disciplina= if_else(qt_faltas<=.75*qt_aulas, "Sim", "Não"),
+         reprova_por_nota = reprovao_por_avaliacao,
+         reprova_por_frequencia = if_else(is.na(duracao_modulo_aula), "Não", "Sim")) %>% 
+  select(-c(nome_programa, id_especificidade, duracao_modulo_aula, computa_carga, reprovao_por_avaliacao))
+
+nota_acima <- detalhe_soma %>% filter(nota_final>valor_atv_normal)
+n_distinct(nota_acima$id_matricula) #21.233
+falta_acima <- detalhe_soma %>% filter(qt_faltas>qt_aulas)
+n_distinct(falta_acima$id_matricula) #2.616
+
+
+
+
+setwd(file.path(diretorio,"entradas"))
+tb_enturmacao <- fread(file = list.files(pattern = "tb_enturmacao"),
+                     sep = "|",
+                     encoding = "UTF-8",
+                     na.strings = "") %>%
+  setnames("#id_enturmacao", "id_enturmacao")
+
+
+
+
+
+final_soma <- turmas_ded_soma %>%
+  inner_join(tb_ded_aluno_soma,
+             by = c("id_turma", "id_disciplina",
+                    "dc_etapa_matricula")) %>%
+  select(-dc_turno,-nome_aluno,-dc_nivel,-id_especificidade,-id_aluno) %>% 
+  left_join(tb_enturmacao, by = c("id_matricula", "id_turma"))%>%
+  select(dc_sre:dc_turno, tipo_turma:nome_aluno, dt_enturmacao) %>%
+  distinct() %>% 
+  left_join(nota_soma_agg, by = c("id_matricula", "id_turma")) %>% 
+  left_join(frequencia_soma_agg, by = c("id_matricula", "id_turma")) %>% 
+  mutate(aprovado_final = if_else(dc_nivel != "ENSINO FUNDAMENTAL ANOS INICIAIS" & aprovado_nota == "Sim" & aprovado_frequencia == "Sim", "Sim",
+                                  if_else(dc_nivel == "ENSINO FUNDAMENTAL ANOS INICIAIS" & aprovado_frequencia == "Sim", "Sim",
+                                          if_else(tipo_turma == "CORREÇÃO DE FLUXO" & aprovado_frequencia == "Sim", "Sim","Não"))))
+
+```
+
+```{r Relatório}
+
+final <- final_soma %>% 
+  left_join(deficiencias_pivot, by = "id_aluno") %>% 
+  select(-n_disciplinas_frequencia,-total_aulas_lecionadas,-frequencia_global,-total_faltas,-aprovado_frequencia) %>% 
+  left_join(frequencia_soma_agg, by = c("id_matricula","id_turma")) %>% 
+  select(dc_sre:valor_atv_recuperacao,tipo_turma:nome_aluno,id_tipo_ensino:aprovado_frequencia,-dt_enturmacao) %>% 
+  filter(aprovado_frequencia == "Não"|
+         aprovado_nota == "Não") %>% 
+  distinct()
+
+
+
+  
+```
+
+
+
+
+```{r}
+
+setwd(file.path((diretorio), "diversos","saidas"))
+
+write.csv(final, "2022_10_18_Resultados_bimestrais.csv")
+
+
+wb <- createWorkbook()
+
+# ABA 1 ----
+
+addWorksheet(wb, sheetName = "Relatorio", gridLines = FALSE)
+
+writeData(wb,
+          sheet = 1,
+          x = final)
+
+
+
+hoje <- format(Sys.time(), "%Y_%m_%d")
+
+saveWorkbook(wb, 
+             file = paste0(hoje, "Resultados_bimestrais.xlsx"), 
+             overwrite = T)
+
+```
